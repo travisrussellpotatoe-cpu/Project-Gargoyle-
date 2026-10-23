@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gargoyle’s Reign: Ancient Royalty</title>
+  <style>
+    :root {
+      --bg: #140d12;
+      --panel: rgba(23, 16, 22, 0.82);
+      --panel-edge: rgba(220, 180, 96, 0.45);
+      --gold: #f7d98f;
+      --gold-strong: #d9a441;
+      --stone: #98a5b2;
+      --stone-dark: #5c6670;
+      --ruby: #d95d73;
+      --emerald: #7dd3a9;
+      --moon: #c7d4ff;
+      --onyx: #08070a;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background:
+        radial-gradient(circle at top, rgba(255, 194, 90, 0.18), transparent 18%),
+        linear-gradient(180deg, #130d11 0%, #090a0d 100%);
+      color: #f3e3bf;
+      font-family: Georgia, "Times New Roman", serif;
+      overflow: hidden;
+    }
+
+    body {
+      display: grid;
+      place-items: center;
+    }
+
+    #game-wrap {
+      position: relative;
+      width: min(100vw, 1280px);
+      height: min(100vh, 780px);
+      display: grid;
+      place-items: center;
+    }
+
+    canvas {
+      display: block;
+      border-radius: 24px;
+      box-shadow:
+        0 0 0 3px rgba(220, 180, 96, 0.55),
+        0 26px 60px rgba(0, 0, 0, 0.6),
+        inset 0 0 40px rgba(253, 216, 138, 0.08);
+    }
+  </style>
+</head>
+<body>
+  <div id="game-wrap">
+    <div id="game"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+  <script>
+    const SYMBOLS = [
+      { key: 'crown', label: 'CROWN', icon: '👑', color: 0xf7d98f },
+      { key: 'ruby', label: 'RUBY', icon: '🔴', color: 0xd95d73 },
+      { key: 'moon', label: 'MOON', icon: '🌙', color: 0xc7d4ff },
+      { key: 'sword', label: 'SWORD', icon: '🗡️', color: 0x94a7c8 },
+      { key: 'gem', label: 'GEM', icon: '💎', color: 0x7dd3a9 },
+      { key: 'gargoyle', label: 'GAR', icon: '🦇', color: 0x7d8ea2 }
+    ];
+
+    class SlotGame extends Phaser.Scene {
+      constructor() {
+        super('SlotGame');
+        this.reels = [];
+        this.visibleRows = 3;
+        this.columns = 5;
+        this.balance = 120;
+        this.bet = 10;
+        this.spinLocked = false;
+      }
+
+      preload() {
+        this.load.bitmapFont('gem', 'https://labs.phaser.io/assets/fonts/bitmap/gem.png', 'https://labs.phaser.io/assets/fonts/bitmap/gem.xml');
+      }
+
+      create() {
+        this.cameras.main.setBackgroundColor('#120d12');
+
+        this.title = this.add.text(640, 58, 'Gargoyle’s Reign: Ancient Royalty', {
+          fontFamily: 'Georgia, serif',
+          fontSize: '34px',
+          color: '#f7d98f',
+          stroke: '#241812',
+          strokeThickness: 5,
+          align: 'center'
+        }).setOrigin(0.5);
+
+        this.subtitle = this.add.text(640, 95, 'The throne still trembles beneath the stone', {
+          fontFamily: 'Georgia, serif',
+          fontSize: '16px',
+          color: '#d6c7a0',
+          letterSpacing: '1px',
+          align: 'center'
+        }).setOrigin(0.5);
+
+        this.table = this.add.container(640, 395);
+
+        const tableBg = this.add.graphics();
+        tableBg.fillStyle(0x1b141a, 1);
+        tableBg.fillRoundedRect(-410, -220, 820, 430, 26);
+        tableBg.lineStyle(4, 0xd8ae55, 1);
+        tableBg.strokeRoundedRect(-410, -220, 820, 430, 26);
+        this.table.add(tableBg);
+
+        const innerGlow = this.add.graphics();
+        innerGlow.fillStyle(0x0a0b0d, 0.75);
+        innerGlow.fillRoundedRect(-360, -170, 720, 300, 18);
+        innerGlow.lineStyle(3, 0x5a4f39, 1);
+        innerGlow.strokeRoundedRect(-360, -170, 720, 300, 18);
+        this.table.add(innerGlow);
+
+        this.reelGroup = this.add.container(0, 0);
+        this.table.add(this.reelGroup);
+
+        this.createReels();
+
+        this.payline = this.add.graphics();
+        this.payline.lineStyle(4, 0xf4d36d, 0.9);
+        this.payline.strokeRoundedRect(-322, -96, 645, 3, 3);
+        this.payline.alpha = 0.15;
+        this.table.add(this.payline);
+
+        this.statusText = this.add.text(640, 550, 'Ancient court awaits your first spin.', {
+          fontFamily: 'Georgia, serif',
+          fontSize: '20px',
+          color: '#f0dca1',
+          align: 'center'
+        }).setOrigin(0.5);
+
+        this.balanceText = this.add.text(180, 585, 'Vault: 120', {
+          fontFamily: 'Georgia, serif',
+          fontSize: '22px',
+          color: '#f9e9b2',
+          stroke: '#1b120d',
+          strokeThickness: 4
+        });
+
+        this.betText = this.add.text(1020, 585, 'Bet: 10', {
+          fontFamily: 'Georgia, serif',
+          fontSize: '22px',
+          color: '#f9e9b2',
+          stroke: '#1b120d',
+          strokeThickness: 4
+        });
+
+        this.spinButton = this.add.container(640, 646);
+        const buttonBg = this.add.graphics();
+        buttonBg.fillStyle(0x3a2018, 1);
+        buttonBg.fillRoundedRect(-165, -34, 330, 68, 18);
+        buttonBg.lineStyle(3, 0xe4bb5a, 1);
+        buttonBg.strokeRoundedRect(-165, -34, 330, 68, 18);
+        this.spinButton.add(buttonBg);
+
+        const buttonText = this.add.text(0, 0, 'Petrifying Cascades', {
+          fontFamily: 'Georgia, serif',
+          fontSize: '24px',
+          color: '#f9e9b2',
+          fontStyle: 'bold',
+          align: 'center'
+        }).setOrigin(0.5);
+        this.spinButton.add(buttonText);
+
+        this.spinButton.setSize(330, 68);
+        this.spinButton.setInteractive({ useHandCursor: true });
+        this.spinButton.on('pointerdown', () => this.doSpin());
+
+        this.winValue = this.add.text(640, 595, '', {
+          fontFamily: 'Georgia, serif',
+          fontSize: '22px',
+          color: '#7ce0b9',
+          align: 'center',
+          stroke: '#123025',
+          strokeThickness: 4
+        }).setOrigin(0.5);
+      }
+
+      createReels() {
+        const startX = -290;
+        const cellW = 120;
+        const cellH = 102;
+
+        for (let col = 0; col < this.columns; col++) {
+          const column = [];
+          const reelX = startX + col * cellW + 60;
+
+          for (let row = 0; row < this.visibleRows; row++) {
+            const symbol = this.makeSymbolCell(reelX, -90 + row * cellH + 16, SYMBOLS[0]);
+            column.push(symbol);
+            this.reelGroup.add(symbol);
+          }
+
+          this.reels.push(column);
+        }
+      }
+
+      makeSymbolCell(x, y, symbol) {
+        const cell = this.add.container(x, y);
+
+        const bg = this.add.graphics();
+        bg.fillStyle(0x1e2127, 1);
+        bg.fillRoundedRect(-48, -36, 96, 72, 16);
+        bg.lineStyle(3, 0xc7a65f, 1);
+        bg.strokeRoundedRect(-48, -36, 96, 72, 16);
+        cell.add(bg);
+
+        const icon = this.add.text(0, -10, symbol.icon, {
+          fontSize: '30px',
+          fontFamily: 'Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji, sans-serif',
+          align: 'center'
+        }).setOrigin(0.5);
+        cell.add(icon);
+
+        const label = this.add.text(0, 18, symbol.label, {
+          fontFamily: 'Georgia, serif',
+          fontSize: '10px',
+          color: '#f1d9a5',
+          align: 'center'
+        }).setOrigin(0.5);
+        cell.add(label);
+
+        return cell;
+      }
+
+      setCellSymbol(cell, symbol) {
+        const icon = cell.list[1];
+        const label = cell.list[2];
+        icon.setText(symbol.icon);
+        label.setText(symbol.label);
+        const frame = cell.list[0];
+        frame.clear();
+        frame.fillStyle(symbol.color, 0.85);
+        frame.fillRoundedRect(-48, -36, 96, 72, 16);
+        frame.lineStyle(3, 0xf4d98f, 1);
+        frame.strokeRoundedRect(-48, -36, 96, 72, 16);
+      }
+
+      randomSymbol() {
+        return Phaser.Math.RND.pick(SYMBOLS);
+      }
+
+      generateColumnSymbols() {
+        return Array.from({ length: this.visibleRows }, () => this.randomSymbol());
+      }
+
+      doSpin() {
+        if (this.spinLocked) return;
+        if (this.balance < this.bet) {
+          this.statusText.setText('The vault is empty — no more royal coinage.');
+          this.winValue.setText('');
+          return;
+        }
+
+        this.balance -= this.bet;
+        this.updateHUD();
+        this.spinLocked = true;
+        this.winValue.setText('');
+        this.statusText.setText('The ancient gears grind to life...');
+        this.spinButton.disableInteractive();
+
+        const stopping = [];
+        for (let col = 0; col < this.columns; col++) {
+          const columnSymbols = this.generateColumnSymbols();
+          stopping.push(columnSymbols);
+
+          const reel = this.reels[col];
+          for (let row = 0; row < this.visibleRows; row++) {
+            const target = columnSymbols[row];
+            const cell = reel[row];
+            const delay = col * 110 + row * 50;
+
+            this.tweens.add({
+              targets: cell,
+              y: cell.y + Phaser.Math.Between(12, 30),
+              duration: 120,
+              ease: 'Sine.easeInOut',
+              yoyo: true,
+              repeat: 2,
+              delay,
+              onComplete: () => {
+                this.setCellSymbol(cell, target);
+              }
+            });
+          }
+        }
+
+        this.time.delayedCall(850 + this.columns * 110, () => {
+          this.scoreBoard(stopping);
+        });
+      }
+
+      scoreBoard(columns) {
+        const rows = [];
+        for (let r = 0; r < this.visibleRows; r++) {
+          const rowSymbols = [];
+          for (let c = 0; c < this.columns; c++) {
+            rowSymbols.push(columns[c][r]);
+          }
+          rows.push(rowSymbols);
+        }
+
+        let totalWin = 0;
+        let message = 'The stone is silent...';
+        const matches = [];
+
+        rows.forEach((row, rowIndex) => {
+          const counts = {};
+          row.forEach((sym) => {
+            counts[sym.key] = (counts[sym.key] || 0) + 1;
+          });
+
+          Object.entries(counts).forEach(([key, count]) => {
+            if (count >= 3) {
+              matches.push({ row: rowIndex, symbol: key, count });
+            }
+          });
+        });
+
+        const diags = [
+          [0, 0], [1, 0], [2, 0], [3, 0], [4, 0],
+          [0, 1], [1, 1], [2, 1], [3, 1], [4, 1],
+          [0, 2], [1, 2], [2, 2], [3, 2], [4, 2]
+        ];
+
+        for (let start = 0; start <= 2; start++) {
+          const triple = [];
+          for (let offset = 0; offset < 3; offset++) {
+            const row = start + offset;
+            const col = offset;
+            if (row < this.visibleRows) {
+              triple.push(columns[col][row]);
+            }
+          }
+          if (triple.length === 3) {
+            const symbol = triple[0];
+            if (triple.every((entry) => entry.key === symbol.key)) {
+              matches.push({ row: start, symbol: symbol.key, count: 3, diagonal: true });
+            }
+          }
+        }
+
+        for (let start = 0; start <= 2; start++) {
+          const triple = [];
+          for (let offset = 0; offset < 3; offset++) {
+            const row = start + offset;
+            const col = 4 - offset;
+            if (row < this.visibleRows) {
+              triple.push(columns[col][row]);
+            }
+          }
+          if (triple.length === 3) {
+            const symbol = triple[0];
+            if (triple.every((entry) => entry.key === symbol.key)) {
+              matches.push({ row: start, symbol: symbol.key, count: 3, diagonal: true });
+            }
+          }
+        }
+
+        if (matches.length > 0) {
+          const lineWins = matches.map((match) => {
+            const symbolValue = SYMBOLS.find((sym) => sym.key === match.symbol);
+            const base = symbolValue ? (match.count * 15) : 20;
+            return base + (match.diagonal ? 20 : 0);
+          });
+          totalWin = lineWins.reduce((sum, value) => sum + value, 0);
+          const topSymbol = matches[0].symbol;
+          const label = SYMBOLS.find((sym) => sym.key === topSymbol)?.label || 'ROYAL';
+          message = `Royal victory! ${label} crowns the court for +${totalWin} coins.`;
+        }
+
+        this.balance += totalWin;
+        this.updateHUD();
+        this.statusText.setText(message);
+        this.winValue.setText(totalWin > 0 ? `Win: +${totalWin}` : '');
+
+        this.time.delayedCall(600, () => {
+          this.spinLocked = false;
+          this.spinButton.setInteractive({ useHandCursor: true });
+        });
+      }
+
+      updateHUD() {
+        this.balanceText.setText(`Vault: ${this.balance}`);
+        this.betText.setText(`Bet: ${this.bet}`);
+      }
+    }
+
+    const game = new Phaser.Game({
+      type: Phaser.AUTO,
+      parent: 'game',
+      width: 1280,
+      height: 720,
+      backgroundColor: '#120d12',
+      scene: [SlotGame]
+    });
+  </script>
+</body>
+</html>
